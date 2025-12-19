@@ -50,16 +50,11 @@
 
 #include <QFileInfo>  // NOLINT cpplint cannot handle include order here
 
-#include <ignition/math/Inertial.hh>
-#include <ignition/math/MassMatrix3.hh>
-#include <ignition/math/Pose3.hh>
-#include <ignition/math/Quaternion.hh>
-#include <ignition/math/Vector3.hh>
-
 #include "resource_retriever/retriever.hpp"
 
 #include "rviz_default_plugins/robot/robot_joint.hpp"
 #include "rviz_default_plugins/robot/robot.hpp"
+#include "robot_link_inertia.hpp"
 
 #include "rviz_rendering/material_manager.hpp"
 #include "rviz_rendering/mesh_loader.hpp"
@@ -870,40 +865,45 @@ void RobotLink::createMass(const urdf::LinkConstSharedPtr & link)
 
 void RobotLink::createInertia(const urdf::LinkConstSharedPtr & link)
 {
-  if (link->inertial) {
-    const ignition::math::Vector3d i_xx_yy_zz(
-      link->inertial->ixx,
-      link->inertial->iyy,
-      link->inertial->izz);
-    const ignition::math::Vector3d Ixyxzyz(
-      link->inertial->ixy,
-      link->inertial->ixz,
-      link->inertial->iyz);
-    ignition::math::MassMatrix3d mass_matrix(link->inertial->mass, i_xx_yy_zz, Ixyxzyz);
-
-    ignition::math::Vector3d box_scale;
-    ignition::math::Quaterniond box_rot;
-    if (!mass_matrix.EquivalentBox(box_scale, box_rot)) {
-      // Invalid inertia, load with default scale
-      if (link->parent_joint && link->parent_joint->type != urdf::Joint::FIXED) {
-        // Do not show error message for base link or static links
-        RVIZ_COMMON_LOG_ERROR_STREAM(
-          "The link " << link->name << " has unrealistic "
-            "inertia, so the equivalent inertia box will not be shown.\n");
-      }
-      return;
-    }
-    Ogre::Vector3 translate(
-      link->inertial->origin.position.x,
-      link->inertial->origin.position.y,
-      link->inertial->origin.position.z);
-    Ogre::Quaternion rotate(box_rot.W(), box_rot.X(), box_rot.Y(), box_rot.Z());
-    Ogre::SceneNode * offset_node = inertia_node_->createChildSceneNode(translate, rotate);
-    inertia_shape_ = new Shape(Shape::Cube, scene_manager_, offset_node);
-
-    inertia_shape_->setColor(1, 0, 0, 1);
-    inertia_shape_->setScale(Ogre::Vector3(box_scale.X(), box_scale.Y(), box_scale.Z()));
+  if (!link->inertial) {
+    return;
   }
+
+  const Eigen::Matrix3d inertia{(Eigen::Matrix3d{} <<
+      link->inertial->ixx, link->inertial->ixy, link->inertial->ixz,
+      link->inertial->ixy, link->inertial->iyy, link->inertial->iyz,
+      link->inertial->ixz, link->inertial->iyz, link->inertial->izz).finished()};
+  const auto result{inertiaEquivalentBox(link->inertial->mass, inertia)};
+  if (!result) {
+    // Invalid inertia, load with default scale
+    if (link->parent_joint && link->parent_joint->type != urdf::Joint::FIXED) {
+      // Do not show error message for base link or static links
+      RVIZ_COMMON_LOG_ERROR_STREAM(
+        "The link " << link->name << " has unrealistic "
+          "inertia, so the equivalent inertia box will not be shown.\n");
+    }
+    return;
+  }
+
+  const Eigen::Quaternionf box_rotation_eigen{result->rotation.cast<float>()};
+  const Ogre::Quaternion box_rotation{box_rotation_eigen.w(), box_rotation_eigen.x(),
+    box_rotation_eigen.y(), box_rotation_eigen.z()};
+  const Eigen::Vector3f box_size_eigen{result->box_size.cast<float>()};
+  const Ogre::Vector3 box_size{box_size_eigen.x(), box_size_eigen.y(), box_size_eigen.z()};
+
+  const urdf::Pose & pose{link->inertial->origin};
+  const Ogre::Vector3 translation{static_cast<float>(pose.position.x),
+    static_cast<float>(pose.position.y),
+    static_cast<float>(pose.position.z)};
+  const Ogre::Quaternion origin_rotation{static_cast<float>(pose.rotation.w),
+    static_cast<float>(pose.rotation.x), static_cast<float>(pose.rotation.y),
+    static_cast<float>(pose.rotation.z)};
+  const Ogre::Quaternion rotation{origin_rotation * box_rotation};
+
+  Ogre::SceneNode * offset_node = inertia_node_->createChildSceneNode(translation, rotation);
+  inertia_shape_ = new Shape(Shape::Cube, scene_manager_, offset_node);
+  inertia_shape_->setColor(1, 0, 0, 1);
+  inertia_shape_->setScale(box_size);
 }
 
 void RobotLink::createSelection()

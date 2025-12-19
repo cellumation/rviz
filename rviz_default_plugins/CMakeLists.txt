@@ -59,10 +59,10 @@ find_package(rviz_ogre_vendor REQUIRED)
 
 find_package(Qt5 REQUIRED COMPONENTS Widgets Test)
 
+find_package(eigen3_cmake_module REQUIRED)
+find_package(Eigen3 REQUIRED)
+
 find_package(geometry_msgs REQUIRED)
-
-find_package(ignition-math6 REQUIRED)
-
 find_package(image_transport REQUIRED)
 find_package(interactive_markers REQUIRED)
 find_package(laser_geometry REQUIRED)
@@ -207,6 +207,8 @@ set(rviz_default_plugins_source_files
   src/rviz_default_plugins/robot/robot.cpp
   src/rviz_default_plugins/robot/robot_joint.cpp
   src/rviz_default_plugins/robot/robot_link.cpp
+  src/rviz_default_plugins/robot/robot_link_inertia.cpp
+  src/rviz_default_plugins/robot/robot_link_inertia.hpp
   src/rviz_default_plugins/robot/robot_element_base_class.cpp
   src/rviz_default_plugins/robot/tf_link_updater.cpp
   src/rviz_default_plugins/tools/interaction/interaction_tool.cpp
@@ -259,7 +261,7 @@ target_link_libraries(rviz_default_plugins PUBLIC
 )
 
 target_link_libraries(rviz_default_plugins PRIVATE
-  ignition-math6
+  Eigen3::Eigen
   resource_retriever::resource_retriever
 )
 
@@ -644,12 +646,14 @@ if(BUILD_TESTING)
 
   ament_add_gmock(robot_test
     test/rviz_default_plugins/robot/robot_test.cpp
+    test/rviz_default_plugins/robot/robot_link_inertia_test.cpp
     ${TEST_FIXTURE_SOURCES_WITH_MOCK}
     ${SKIP_DISPLAY_TESTS})
   if(TARGET robot_test)
     target_include_directories(robot_test PRIVATE test)
     target_link_libraries(robot_test
       ${TEST_FIXTURE_WITH_MOCK_LIBRARIES}
+      Eigen3::Eigen
       resource_retriever::resource_retriever
       Qt5::Widgets
       rviz_default_plugins
